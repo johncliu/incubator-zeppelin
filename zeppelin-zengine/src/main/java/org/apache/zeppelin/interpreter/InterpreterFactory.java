@@ -227,7 +227,7 @@ public class InterpreterFactory {
       // While we decided to turn this feature on always (without providing
       // enable/disable option on GUI).
       // previously created setting should turn this feature on here.
-      setting.getOption().setRemote(true);
+      //setting.getOption().setRemote(true);
 
 
 

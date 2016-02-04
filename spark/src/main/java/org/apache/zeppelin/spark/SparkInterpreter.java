@@ -30,6 +30,7 @@ import java.util.*;
 
 import com.google.common.base.Joiner;
 
+import org.apache.commons.io.FileUtils;
 import org.apache.spark.HttpServer;
 import org.apache.spark.SparkConf;
 import org.apache.spark.SparkContext;
@@ -555,7 +556,7 @@ public class SparkInterpreter extends Interpreter {
   }
 
   private List<File> currentClassPath() {
-    List<File> paths = classPath(Thread.currentThread().getContextClassLoader());
+    List<File> paths = classPath(SparkInterpreter.class.getClassLoader());
     String[] cps = System.getProperty("java.class.path").split(File.pathSeparator);
     if (cps != null) {
       for (String cp : cps) {
@@ -566,16 +567,28 @@ public class SparkInterpreter extends Interpreter {
   }
 
   private List<File> classPath(ClassLoader cl) {
-    List<File> paths = new LinkedList<File>();
-    if (cl == null) {
-      return paths;
+    List<File> paths = new LinkedList<>();
+    String synthesysHomeEnv = System.getenv("SYNTHESYS_HOME");
+    if (synthesysHomeEnv != null)
+    {
+      File synthesysApi = new File(new File(synthesysHomeEnv), "api");
+      if (synthesysApi.exists())
+      {
+        for (File jar : FileUtils.listFiles(synthesysApi, new String[]{"jar"}, false))
+        {
+          paths.add(jar);
+        }
+      }
     }
 
-    if (cl instanceof URLClassLoader) {
+    if (cl instanceof URLClassLoader)
+    {
       URLClassLoader ucl = (URLClassLoader) cl;
       URL[] urls = ucl.getURLs();
-      if (urls != null) {
-        for (URL url : urls) {
+      if (urls != null)
+      {
+        for (URL url : urls)
+        {
           paths.add(new File(url.getFile()));
         }
       }
