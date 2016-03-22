@@ -19,6 +19,7 @@ package org.apache.zeppelin.spark;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.IOException;
 import java.io.PrintStream;
 import java.io.PrintWriter;
 import java.lang.reflect.Constructor;
@@ -26,11 +27,20 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.net.URL;
 import java.net.URLClassLoader;
+import java.nio.file.FileVisitOption;
+import java.nio.file.FileVisitResult;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.*;
 
 import com.google.common.base.Joiner;
 
 import org.apache.commons.io.FileUtils;
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.Path;
 import org.apache.spark.HttpServer;
 import org.apache.spark.SparkConf;
 import org.apache.spark.SparkContext;
@@ -84,31 +94,34 @@ import scala.tools.nsc.settings.MutableSettings.PathSetting;
  */
 public class SparkInterpreter extends Interpreter {
   Logger logger = LoggerFactory.getLogger(SparkInterpreter.class);
-
+  private static Path install;
   static {
     Interpreter.register(
-        "spark",
-        "spark",
-        SparkInterpreter.class.getName(),
-        new InterpreterPropertyBuilder()
-            .add("spark.app.name", "Zeppelin", "The name of spark application.")
-            .add("master",
-                getSystemDefault("MASTER", "spark.master", "local[*]"),
-                "Spark master uri. ex) spark://masterhost:7077")
-            .add("spark.executor.memory",
-                getSystemDefault(null, "spark.executor.memory", "512m"),
-                "Executor memory per worker instance. ex) 512m, 32g")
-            .add("spark.cores.max",
-                getSystemDefault(null, "spark.cores.max", ""),
-                "Total number of cores to use. Empty value uses all available core.")
-            .add("zeppelin.spark.useHiveContext",
-                getSystemDefault("ZEPPELIN_SPARK_USEHIVECONTEXT",
-                    "zeppelin.spark.useHiveContext", "true"),
-                "Use HiveContext instead of SQLContext if it is true.")
-            .add("zeppelin.spark.maxResult",
-                getSystemDefault("ZEPPELIN_SPARK_MAXRESULT", "zeppelin.spark.maxResult", "1000"),
-                "Max number of SparkSQL result to display.")
-            .add("args", "", "spark commandline args").build());
+            "spark",
+            "spark",
+            SparkInterpreter.class.getName(),
+            new InterpreterPropertyBuilder()
+                    .add("spark.app.name", "Zeppelin", "The name of spark application.")
+                    .add("master",
+                         getSystemDefault("MASTER", "spark.master", "yarn-client"),
+                         "Spark master uri. ex) spark://masterhost:7077")
+                    .add("spark.yarn.user.classpath.first", "true",
+                         "Required to hook into spark with custom architecture")
+                    .add("spark.executor.memory",
+                         getSystemDefault(null, "spark.executor.memory", "512m"),
+                         "Executor memory per worker instance. ex) 512m, 32g")
+                    .add("spark.cores.max",
+                         getSystemDefault(null, "spark.cores.max", ""),
+                         "Total number of cores to use. Empty value uses all available core.")
+                    .add("zeppelin.spark.useHiveContext",
+                         getSystemDefault("ZEPPELIN_SPARK_USEHIVECONTEXT",
+                                          "zeppelin.spark.useHiveContext", "false"),
+                         "Use HiveContext instead of SQLContext if it is true.")
+                    .add("zeppelin.spark.maxResult",
+                         getSystemDefault("ZEPPELIN_SPARK_MAXRESULT",
+                                          "zeppelin.spark.maxResult", "1000"),
+                         "Max number of SparkSQL result to display.")
+                    .add("args", "", "spark commandline args").build());
 
   }
 
@@ -126,7 +139,6 @@ public class SparkInterpreter extends Interpreter {
   private Map<String, Object> binder;
   private SparkEnv env;
   private SparkVersion sparkVersion;
-
 
   public SparkInterpreter(Properties property) {
     super(property);
@@ -306,6 +318,33 @@ public class SparkInterpreter extends Interpreter {
       }
     }
 
+    if ( conf.get("master").equals("yarn-client") ) {
+      final String sparkJars = System.getProperty("spark.jars");
+      conf.set("spark.jars", sparkJars == null ? "" : sparkJars);
+
+      final String synthesysHomeEnv = System.getenv("SYNTHESYS_HOME");
+      if ( synthesysHomeEnv != null ) {
+        try {
+          if(install == null)
+          {
+            final String installRoot = System.getProperty("synthesys.hdfs.install.root");
+            final Path hdfsInstallRoot = new Path(installRoot, "notebook-" + UUID.randomUUID().toString());
+            install(Paths.get(synthesysHomeEnv), hdfsInstallRoot);
+            install = hdfsInstallRoot;
+          }
+
+          conf.set("spark.driver.extraJavaOptions",
+                   String.format("-Dsynthesys.install.location=%s", install.toString()));
+          conf.set("spark.executor.extraJavaOptions",
+                   String.format("-Dsynthesys.install.location=%s", install.toString()));
+        }
+        catch ( IOException e )
+        {
+          throw new RuntimeException(e);
+        }
+      }
+    }
+
     //TODO(jongyoul): Move these codes into PySparkInterpreter.java
     String pysparkBasePath = getSystemDefault("SPARK_HOME", null, null);
     File pysparkPath;
@@ -343,6 +382,48 @@ public class SparkInterpreter extends Interpreter {
 
     SparkContext sparkContext = new SparkContext(conf);
     return sparkContext;
+  }
+
+  public static void install(final java.nio.file.Path home,
+                             final Path hdfsInstallRoot) throws IOException {
+    final ClassLoader old = Thread.currentThread().getContextClassLoader();
+    try {
+      Thread.currentThread().setContextClassLoader(Configuration.class.getClassLoader());
+      final FileSystem fs = FileSystem.get(new Configuration());
+      for (final String subdir : Arrays.asList("api", "plugins") )
+      {
+        Files.walkFileTree(home.resolve(subdir), Collections.<FileVisitOption>emptySet(),
+                           Integer.MAX_VALUE, new SimpleFileVisitor<java.nio.file.Path>(){
+         @Override
+         public FileVisitResult preVisitDirectory(final java.nio.file.Path dir,
+                                                 final BasicFileAttributes attrs)
+             throws IOException {
+             if (dir.getFileName().toString().equals("elasticsearch")) {
+              return FileVisitResult.SKIP_SUBTREE;
+             }
+             return FileVisitResult.CONTINUE;
+         }
+
+         @Override
+         public FileVisitResult visitFile(final java.nio.file.Path file,
+                                         final BasicFileAttributes attrs)
+            throws IOException {
+           String relative = home.relativize(file).toString();
+           Path hadoopPath = new Path(hdfsInstallRoot, relative);
+           if (Files.isDirectory(file)) {
+             fs.mkdirs(hadoopPath);
+           }
+           else {
+            fs.copyFromLocalFile(false, new Path(file.toString()), hadoopPath);
+           }
+           return FileVisitResult.CONTINUE;
+         }
+       });
+      }
+    }
+    finally {
+      Thread.currentThread().setContextClassLoader(old);
+    }
   }
 
   static final String toString(Object o) {
@@ -447,8 +528,8 @@ public class SparkInterpreter extends Interpreter {
 
 
     // set classloader for scala compiler
-    settings.explicitParentLoader_$eq(new Some<ClassLoader>(Thread.currentThread()
-        .getContextClassLoader()));
+    settings.explicitParentLoader_$eq(new Some<ClassLoader>(SparkInterpreter.class
+        .getClassLoader()));
     BooleanSetting b = (BooleanSetting) settings.usejavacp();
     b.v_$eq(true);
     settings.scala$tools$nsc$settings$StandardScalaSettings$_setter_$usejavacp_$eq(b);
