@@ -83,6 +83,16 @@
 
   <inceptionYear>2013</inceptionYear>
 
+  <repositories>
+    <repository>
+      <id>drsi-releases</id>
+      <releases>
+        <enabled>true</enabled>
+      </releases>
+      <url>https://nexus.corp.digitalreasoning.com/nexus/content/repositories/releases</url>
+    </repository>
+  </repositories>
+
   <modules>
     <module>zeppelin-interpreter</module>
     <module>zeppelin-zengine</module>
@@ -208,6 +218,16 @@
         <version>4.11</version>
         <scope>test</scope>
       </dependency>
+
+      <!-- synthesys -->
+      <dependency>
+        <groupId>com.digitalreasoning.synthesys.api</groupId>
+        <artifactId>synthesys-api-bom</artifactId>
+        <version>1.0.0-alpha13</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+
     </dependencies>
   </dependencyManagement>
 

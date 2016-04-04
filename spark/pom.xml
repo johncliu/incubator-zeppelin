@@ -98,6 +98,18 @@
   </profiles>
 
   <dependencies>
+
+    <dependency>
+      <groupId>com.digitalreasoning.synthesys.kernel</groupId>
+      <artifactId>synthesys-kernel</artifactId>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.digitalreasoning.synthesys.api</groupId>
+      <artifactId>synthesys-api-core</artifactId>
+      <scope>provided</scope>
+    </dependency>
+
     <dependency>
       <groupId>org.slf4j</groupId>
       <artifactId>slf4j-api</artifactId>

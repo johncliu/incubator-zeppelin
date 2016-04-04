@@ -613,7 +613,7 @@ public class InterpreterFactory {
       URLClassLoader ccl = cleanCl.get(dirName);
       if (ccl == null) {
         // classloader fallback
-        ccl = URLClassLoader.newInstance(new URL[] {}, oldcl);
+        ccl = URLClassLoader.newInstance(new URL[] {}, InterpreterFactory.class.getClassLoader());
       }
 
       boolean separateCL = true;

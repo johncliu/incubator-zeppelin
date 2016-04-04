@@ -92,7 +92,7 @@ public class InterpreterRestApi {
     p.putAll(request.getProperties());
     // Option is deprecated from API, always use remote = true
     InterpreterGroup interpreterGroup = interpreterFactory.add(request.getName(),
-        request.getGroup(), new InterpreterOption(true), p);
+        request.getGroup(), new InterpreterOption(false), p);
     InterpreterSetting setting = interpreterFactory.get(interpreterGroup.getId());
     logger.info("new setting created with " + setting.id());
     return new JsonResponse(Status.CREATED, "", setting ).build();
@@ -108,7 +108,7 @@ public class InterpreterRestApi {
           UpdateInterpreterSettingRequest.class);
       // Option is deprecated from API, always use remote = true
       interpreterFactory.setPropertyAndRestart(settingId,
-          new InterpreterOption(true), p.getProperties());
+          new InterpreterOption(false), p.getProperties());
     } catch (InterpreterException e) {
       return new JsonResponse(
           Status.NOT_FOUND, e.getMessage(), ExceptionUtils.getStackTrace(e)).build();

@@ -19,14 +19,17 @@ package org.apache.zeppelin.spark;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.io.PrintWriter;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.net.URI;
 import java.net.URL;
 import java.net.URLClassLoader;
+import java.nio.file.DirectoryStream;
 import java.nio.file.FileVisitOption;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
@@ -34,11 +37,18 @@ import java.nio.file.Paths;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.*;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
+import com.digitalreasoning.synthesys.api.core.SynthesysConfig;
+import com.digitalreasoning.synthesys.kernel.Kernel;
+import com.digitalreasoning.synthesys.kernel.plugins.Plugin;
 import com.google.common.base.Joiner;
 
 import org.apache.commons.io.FileUtils;
+import org.apache.commons.io.IOUtils;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.spark.HttpServer;
@@ -94,7 +104,8 @@ import scala.tools.nsc.settings.MutableSettings.PathSetting;
  */
 public class SparkInterpreter extends Interpreter {
   Logger logger = LoggerFactory.getLogger(SparkInterpreter.class);
-  private static Path install;
+  private static URI install;
+  private Object installLock = new Object();
   static {
     Interpreter.register(
             "spark",
@@ -302,9 +313,13 @@ public class SparkInterpreter extends Interpreter {
     if (execUri != null) {
       conf.set("spark.executor.uri", execUri);
     }
-    if (System.getenv("SPARK_HOME") != null) {
+
+    String sparkHome = System.getenv("SPARK_HOME");
+
+    if (sparkHome != null && !sparkHome.trim().isEmpty()) {
       conf.setSparkHome(System.getenv("SPARK_HOME"));
     }
+
     conf.set("spark.scheduler.mode", "FAIR");
 
     Properties intpProperty = getProperty();
@@ -319,30 +334,57 @@ public class SparkInterpreter extends Interpreter {
     }
 
     if ( conf.get("master").equals("yarn-client") ) {
-      final String sparkJars = System.getProperty("spark.jars");
-      conf.set("spark.jars", sparkJars == null ? "" : sparkJars);
+      if(sparkHome == null || sparkHome.trim().isEmpty())
+      {
+        throw new RuntimeException("SPARK_HOME must be set for yarn-client mode");
+      }
 
-      final String synthesysHomeEnv = System.getenv("SYNTHESYS_HOME");
-      if ( synthesysHomeEnv != null ) {
-        try {
-          if(install == null)
+      final Plugin.Part thisPlugin = Kernel.INSTANCE.getPluginSystem().findPluginForClass(SparkInterpreter.class);
+      final StringBuilder sparkJars = new StringBuilder();
+      boolean first = true;
+      try(DirectoryStream<java.nio.file.Path> directoryStream = Files.newDirectoryStream(thisPlugin.getFileSystem().resolve("spark-libs")))
+      {
+        for(java.nio.file.Path sparkLib : directoryStream)
+        {
+          if(!first)
           {
-            final String installRoot = System.getProperty("synthesys.hdfs.install.root");
-            final Path hdfsInstallRoot = new Path(installRoot, "notebook-" + UUID.randomUUID().toString());
-            install(Paths.get(synthesysHomeEnv), hdfsInstallRoot);
-            install = hdfsInstallRoot;
+            sparkJars.append(',');
           }
+          else
+          {
+            first = false;
+          }
+          sparkJars.append(sparkLib.toString());
+        }
+      }
+      catch (IOException e)
+      {
+        throw new RuntimeException(e);
+      }
 
-          conf.set("spark.driver.extraJavaOptions",
-                   String.format("-Dsynthesys.install.location=%s", install.toString()));
-          conf.set("spark.executor.extraJavaOptions",
-                   String.format("-Dsynthesys.install.location=%s", install.toString()));
+      conf.set("spark.jars", sparkJars.toString());
+
+      final java.nio.file.Path synthesysHome = Kernel.INSTANCE.getLocations().lookupHome();
+        try {
+
+          synchronized (installLock)
+          {
+            if(install == null)
+            {
+              final SynthesysConfig synthesysConfig = Kernel.INSTANCE.getExtensionSystem().accessExtensionPoint(SynthesysConfig.class).select().instantiate();
+              final String installRoot = synthesysConfig.getString(SynthesysConfig.HDFS_ROOT, SynthesysConfig.HDFS_ROOT_DEFAULT) + "/installed";
+              final Path hdfsInstallRoot = new Path(installRoot, "notebook-" + UUID.randomUUID().toString());
+              final Path synthesysArchiveLocation = new Path(hdfsInstallRoot, "synthesys.zip");
+              install(synthesysHome, synthesysArchiveLocation);
+            }
+          }
+          System.out.println(install);
+          conf.set("spark.archives", install.toString());
         }
         catch ( IOException e )
         {
           throw new RuntimeException(e);
         }
-      }
     }
 
     //TODO(jongyoul): Move these codes into PySparkInterpreter.java
@@ -385,40 +427,59 @@ public class SparkInterpreter extends Interpreter {
   }
 
   public static void install(final java.nio.file.Path home,
-                             final Path hdfsInstallRoot) throws IOException {
+                             final Path synthesysArchiveLocation) throws IOException {
     final ClassLoader old = Thread.currentThread().getContextClassLoader();
     try {
       Thread.currentThread().setContextClassLoader(Configuration.class.getClassLoader());
       final FileSystem fs = FileSystem.get(new Configuration());
-      for (final String subdir : Arrays.asList("api", "plugins") )
-      {
-        Files.walkFileTree(home.resolve(subdir), Collections.<FileVisitOption>emptySet(),
-                           Integer.MAX_VALUE, new SimpleFileVisitor<java.nio.file.Path>(){
-         @Override
-         public FileVisitResult preVisitDirectory(final java.nio.file.Path dir,
-                                                 final BasicFileAttributes attrs)
-             throws IOException {
-             if (dir.getFileName().toString().equals("elasticsearch")) {
-              return FileVisitResult.SKIP_SUBTREE;
-             }
-             return FileVisitResult.CONTINUE;
-         }
 
-         @Override
-         public FileVisitResult visitFile(final java.nio.file.Path file,
-                                         final BasicFileAttributes attrs)
-            throws IOException {
-           String relative = home.relativize(file).toString();
-           Path hadoopPath = new Path(hdfsInstallRoot, relative);
-           if (Files.isDirectory(file)) {
-             fs.mkdirs(hadoopPath);
-           }
-           else {
-            fs.copyFromLocalFile(false, new Path(file.toString()), hadoopPath);
-           }
-           return FileVisitResult.CONTINUE;
-         }
-       });
+      final FSDataOutputStream synthesysArchive = fs.create(synthesysArchiveLocation);
+      final ZipOutputStream zos = new ZipOutputStream(synthesysArchive);
+      zos.setMethod(ZipOutputStream.DEFLATED);
+      zos.setLevel(0);
+
+      try
+      {
+        for (final String subdir : Arrays.asList("api", "plugins") )
+        {
+          Files.walkFileTree(home.resolve(subdir), Collections.<FileVisitOption>emptySet(),
+                             Integer.MAX_VALUE, new SimpleFileVisitor<java.nio.file.Path>()
+          {
+              @Override
+              public FileVisitResult preVisitDirectory(final java.nio.file.Path dir,
+                                                       final BasicFileAttributes attrs)
+                      throws IOException {
+                if (dir.getFileName().toString().equals("elasticsearch")) {
+                  return FileVisitResult.SKIP_SUBTREE;
+                }
+                return FileVisitResult.CONTINUE;
+              }
+
+              @Override
+              public FileVisitResult visitFile(final java.nio.file.Path file,
+                                               final BasicFileAttributes attrs)
+                      throws IOException {
+                if (Files.isRegularFile(file))
+                {
+                  final String relative = home.relativize(file).toString();
+                  zos.putNextEntry(new ZipEntry(relative));
+
+                  try (FileInputStream entryIs = new FileInputStream(file.toFile()))
+                  {
+                    IOUtils.copy(entryIs, zos);
+                  }
+                  zos.closeEntry();
+                }
+                return FileVisitResult.CONTINUE;
+              }
+          });
+        }
+        install = fs.makeQualified(synthesysArchiveLocation).toUri();
+      }
+      finally
+      {
+        zos.close();
+        synthesysArchive.close();
       }
     }
     finally {
@@ -649,16 +710,12 @@ public class SparkInterpreter extends Interpreter {
 
   private List<File> classPath(ClassLoader cl) {
     List<File> paths = new LinkedList<>();
-    String synthesysHomeEnv = System.getenv("SYNTHESYS_HOME");
-    if (synthesysHomeEnv != null)
+    File synthesysApi = Kernel.INSTANCE.getLocations().lookupHome().resolve("api").toFile();
+    if (synthesysApi.exists())
     {
-      File synthesysApi = new File(new File(synthesysHomeEnv), "api");
-      if (synthesysApi.exists())
+      for (File jar : FileUtils.listFiles(synthesysApi, new String[]{"jar"}, false))
       {
-        for (File jar : FileUtils.listFiles(synthesysApi, new String[]{"jar"}, false))
-        {
-          paths.add(jar);
-        }
+        paths.add(jar);
       }
     }
 
