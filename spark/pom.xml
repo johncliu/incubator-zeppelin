@@ -22,14 +22,14 @@
   <parent>
     <artifactId>zeppelin</artifactId>
     <groupId>org.apache.zeppelin</groupId>
-    <version>0.5.6-incubating</version>
+    <version>0.5.6-drs1</version>
     <relativePath>..</relativePath>
   </parent>
 
   <groupId>org.apache.zeppelin</groupId>
   <artifactId>zeppelin-spark</artifactId>
   <packaging>jar</packaging>
-  <version>0.5.6-incubating</version>
+  <version>0.5.6-drs1</version>
   <name>Zeppelin: Spark</name>
   <description>Zeppelin spark support</description>
   <url>http://zeppelin.incubator.apache.org</url>
@@ -98,6 +98,18 @@
   </profiles>
 
   <dependencies>
+
+    <dependency>
+      <groupId>com.digitalreasoning.synthesys.kernel</groupId>
+      <artifactId>synthesys-kernel</artifactId>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.digitalreasoning.synthesys.api</groupId>
+      <artifactId>synthesys-api-core</artifactId>
+      <scope>provided</scope>
+    </dependency>
+
     <dependency>
       <groupId>org.slf4j</groupId>
       <artifactId>slf4j-api</artifactId>

@@ -19,6 +19,7 @@ package org.apache.zeppelin.display;
 
 import java.io.Serializable;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
@@ -168,6 +169,11 @@ public class Input implements Serializable {
   }
 
   public static Map<String, Input> extractSimpleQueryParam(String script) {
+    if(script == null)
+    {
+      return Collections.emptyMap();
+    }
+
     Map<String, Input> params = new HashMap<String, Input>();
     if (script == null) {
       return params;
@@ -260,6 +266,11 @@ public class Input implements Serializable {
   }
 
   public static String getSimpleQuery(Map<String, Object> params, String script) {
+    if(script == null)
+    {
+      return "";
+    }
+
     String replaced = script;
 
     for (String key : params.keySet()) {

@@ -227,7 +227,7 @@ public class InterpreterFactory {
       // While we decided to turn this feature on always (without providing
       // enable/disable option on GUI).
       // previously created setting should turn this feature on here.
-      setting.getOption().setRemote(true);
+      //setting.getOption().setRemote(true);
 
 
 
@@ -613,7 +613,7 @@ public class InterpreterFactory {
       URLClassLoader ccl = cleanCl.get(dirName);
       if (ccl == null) {
         // classloader fallback
-        ccl = URLClassLoader.newInstance(new URL[] {}, oldcl);
+        ccl = URLClassLoader.newInstance(new URL[] {}, InterpreterFactory.class.getClassLoader());
       }
 
       boolean separateCL = true;

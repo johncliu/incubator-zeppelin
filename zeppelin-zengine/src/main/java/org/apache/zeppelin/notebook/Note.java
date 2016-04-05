@@ -54,6 +54,7 @@ public class Note implements Serializable, JobListener {
   final List<Paragraph> paragraphs = new LinkedList<>();
   private String name = "";
   private String id;
+  private boolean template = false;
 
   @SuppressWarnings("rawtypes")
   Map<String, List<AngularObject>> angularObjects = new HashMap<>();
@@ -76,6 +77,7 @@ public class Note implements Serializable, JobListener {
    * - cron : cron expression validity.
    */
   private Map<String, Object> info = new HashMap<>();
+
 
 
   public Note() {}
@@ -442,4 +444,13 @@ public class Note implements Serializable, JobListener {
   @Override
   public void onProgressUpdate(Job job, int progress) {}
 
+  public boolean isTemplate()
+  {
+    return template;
+  }
+
+  public void setTemplate(boolean template)
+  {
+    this.template = template;
+  }
 }

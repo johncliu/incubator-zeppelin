@@ -22,14 +22,14 @@
   <parent>
     <artifactId>zeppelin</artifactId>
     <groupId>org.apache.zeppelin</groupId>
-    <version>0.5.6-incubating</version>
+    <version>0.5.6-drs1</version>
     <relativePath>..</relativePath>
   </parent>
 
   <groupId>org.apache.zeppelin</groupId>
   <artifactId>zeppelin-server</artifactId>
   <packaging>jar</packaging>
-  <version>0.5.6-incubating</version>
+  <version>0.5.6-drs1</version>
   <name>Zeppelin: Server</name>
   <url>http://www.nflabs.com</url>
 
@@ -307,15 +307,6 @@
         </executions>
         <configuration>
           <argLine>-Xmx2048m</argLine>
-        </configuration>
-      </plugin>
-
-      <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-deploy-plugin</artifactId>
-        <version>2.7</version>
-        <configuration>
-          <skip>true</skip>
         </configuration>
       </plugin>
 
