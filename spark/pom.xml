@@ -109,7 +109,16 @@
       <artifactId>synthesys-api-core</artifactId>
       <scope>provided</scope>
     </dependency>
-
+    <dependency>
+      <groupId>com.digitalreasoning.synthesys.api</groupId>
+      <artifactId>synthesys-api-coordination</artifactId>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.digitalreasoning.synthesys.api</groupId>
+      <artifactId>synthesys-api-elasticsearch</artifactId>
+      <scope>provided</scope>
+    </dependency>
     <dependency>
       <groupId>org.slf4j</groupId>
       <artifactId>slf4j-api</artifactId>

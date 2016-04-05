@@ -21,11 +21,15 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.OutputStreamWriter;
 import java.io.PrintStream;
 import java.io.PrintWriter;
+import java.io.Reader;
+import java.io.Writer;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.URL;
 import java.net.URLClassLoader;
@@ -37,13 +41,18 @@ import java.nio.file.Paths;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.*;
+import java.util.function.Supplier;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
+import com.digitalreasoning.synthesys.api.coordination.kg.KnowledgeGraphRegistry;
 import com.digitalreasoning.synthesys.api.core.SynthesysConfig;
+import com.digitalreasoning.synthesys.api.elasticsearch.ElasticsearchAccess;
 import com.digitalreasoning.synthesys.kernel.Kernel;
 import com.digitalreasoning.synthesys.kernel.plugins.Plugin;
+import com.google.common.base.Charsets;
 import com.google.common.base.Joiner;
+import com.google.common.io.CharStreams;
 
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.IOUtils;
@@ -78,6 +87,14 @@ import org.apache.zeppelin.scheduler.Scheduler;
 import org.apache.zeppelin.scheduler.SchedulerFactory;
 import org.apache.zeppelin.spark.dep.DependencyContext;
 import org.apache.zeppelin.spark.dep.DependencyResolver;
+import org.elasticsearch.action.ActionFuture;
+import org.elasticsearch.action.admin.cluster.state.ClusterStateResponse;
+import org.elasticsearch.client.Client;
+import org.elasticsearch.client.ClusterAdminClient;
+import org.elasticsearch.cluster.node.DiscoveryNode;
+import org.elasticsearch.cluster.node.DiscoveryNodes;
+import org.elasticsearch.common.transport.InetSocketTransportAddress;
+import org.elasticsearch.common.transport.TransportAddress;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -105,6 +122,8 @@ import scala.tools.nsc.settings.MutableSettings.PathSetting;
 public class SparkInterpreter extends Interpreter {
   Logger logger = LoggerFactory.getLogger(SparkInterpreter.class);
   private static URI install;
+  private static URI keyspaceLocation;
+  private static Path hdfsInstallRoot;
   private Object installLock = new Object();
   static {
     Interpreter.register(
@@ -333,6 +352,40 @@ public class SparkInterpreter extends Interpreter {
       }
     }
 
+    synchronized (installLock)
+    {
+      if(keyspaceLocation == null)
+      {
+        final SynthesysConfig synthesysConfig = Kernel.INSTANCE.getExtensionSystem().accessExtensionPoint(SynthesysConfig.class).select().instantiate();
+        final String installRoot = synthesysConfig.getString(SynthesysConfig.HDFS_ROOT, SynthesysConfig.HDFS_ROOT_DEFAULT) + "/installed";
+        hdfsInstallRoot = new Path(installRoot, "notebook-" + UUID.randomUUID().toString());
+        final KnowledgeGraphRegistry kgRegistry = Kernel.INSTANCE.getExtensionSystem().accessExtensionPoint(KnowledgeGraphRegistry.class).select().instantiate();
+        final Map<String, Supplier<? extends Reader>> keyspaceDescriptors = kgRegistry.getKnowledgeGraphTemplate().getKeyspaceDescriptors();
+        final Path descriptorPath = new Path(hdfsInstallRoot, "_keyspacedescriptors");
+        final FileSystem fs = getFileSystem();
+        try
+        {
+          for (String name : keyspaceDescriptors.keySet())
+          {
+            final Path descriptorFilePath = new Path(descriptorPath, name + "-descriptor.xml");
+            if(!fs.exists(descriptorFilePath))
+            {
+              try(Writer descriptorWriter = new OutputStreamWriter(fs.create(descriptorFilePath, true), Charsets.UTF_8);
+                  Reader reader = keyspaceDescriptors.get(name).get())
+              {
+                CharStreams.copy(reader, descriptorWriter);
+              }
+            }
+          }
+        }catch (IOException e)
+        {
+          throw new RuntimeException(e);
+        }
+        keyspaceLocation = fs.makeQualified(descriptorPath).toUri();
+        conf.set("spark.synthesys._keyspacedescriptors", keyspaceLocation.toString());
+      }
+    }
+
     if ( conf.get("master").equals("yarn-client") ) {
       if(sparkHome == null || sparkHome.trim().isEmpty())
       {
@@ -371,9 +424,6 @@ public class SparkInterpreter extends Interpreter {
           {
             if(install == null)
             {
-              final SynthesysConfig synthesysConfig = Kernel.INSTANCE.getExtensionSystem().accessExtensionPoint(SynthesysConfig.class).select().instantiate();
-              final String installRoot = synthesysConfig.getString(SynthesysConfig.HDFS_ROOT, SynthesysConfig.HDFS_ROOT_DEFAULT) + "/installed";
-              final Path hdfsInstallRoot = new Path(installRoot, "notebook-" + UUID.randomUUID().toString());
               final Path synthesysArchiveLocation = new Path(hdfsInstallRoot, "synthesys.zip");
               install(synthesysHome, synthesysArchiveLocation);
             }
@@ -386,6 +436,9 @@ public class SparkInterpreter extends Interpreter {
           throw new RuntimeException(e);
         }
     }
+
+    final ElasticsearchAccess esAccess = Kernel.INSTANCE.getExtensionSystem().accessExtensionPoint(ElasticsearchAccess.class).select().instantiate();
+    conf.set("spark.es.nodes", findEsNodesConfig(esAccess));
 
     //TODO(jongyoul): Move these codes into PySparkInterpreter.java
     String pysparkBasePath = getSystemDefault("SPARK_HOME", null, null);
@@ -426,12 +479,52 @@ public class SparkInterpreter extends Interpreter {
     return sparkContext;
   }
 
-  public static void install(final java.nio.file.Path home,
-                             final Path synthesysArchiveLocation) throws IOException {
+  private static String findEsNodesConfig(final ElasticsearchAccess elasticsearchAccess)
+  {
+    final StringBuilder esNodes = new StringBuilder();
+    Client es = elasticsearchAccess.createClient();
+
+    final ClusterAdminClient cluster = es.admin().cluster();
+    final ActionFuture<ClusterStateResponse> future = cluster.state(cluster.prepareState().all().request());
+    final ClusterStateResponse clusterStateResponse = future.actionGet();
+    final DiscoveryNodes nodes = clusterStateResponse.getState().getNodes();
+    for (DiscoveryNode dNode: nodes)
+    {
+      if (!dNode.clientNode())
+      {
+        final TransportAddress address = dNode.getAddress();
+        if(address instanceof InetSocketTransportAddress)
+        {
+          InetSocketAddress hostPort = ((InetSocketTransportAddress) address).address();
+          if(esNodes.length() != 0)
+          {
+            esNodes.append(',');
+          }
+          esNodes.append(hostPort.getHostString());
+        }
+      }
+    }
+    return esNodes.toString();
+  }
+
+  public static FileSystem getFileSystem()
+  {
     final ClassLoader old = Thread.currentThread().getContextClassLoader();
     try {
       Thread.currentThread().setContextClassLoader(Configuration.class.getClassLoader());
-      final FileSystem fs = FileSystem.get(new Configuration());
+      return FileSystem.get(new Configuration());
+    }
+    catch (IOException e)
+    {
+      throw new RuntimeException(e);
+    }
+    finally {
+      Thread.currentThread().setContextClassLoader(old);
+    }
+  }
+  public static void install(final java.nio.file.Path home,
+                             final Path synthesysArchiveLocation) throws IOException {
+      final FileSystem fs = getFileSystem();
 
       final FSDataOutputStream synthesysArchive = fs.create(synthesysArchiveLocation);
       final ZipOutputStream zos = new ZipOutputStream(synthesysArchive);
@@ -481,10 +574,6 @@ public class SparkInterpreter extends Interpreter {
         zos.close();
         synthesysArchive.close();
       }
-    }
-    finally {
-      Thread.currentThread().setContextClassLoader(old);
-    }
   }
 
   static final String toString(Object o) {
