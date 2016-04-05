@@ -321,6 +321,7 @@ public class NotebookServer extends WebSocketServlet implements
 
       info.put("id", note.id());
       info.put("name", note.getName());
+      info.put("template", Boolean.toString(note.isTemplate()));
       notesInfo.add(info);
     }
 
