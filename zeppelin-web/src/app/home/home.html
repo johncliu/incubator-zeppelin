@@ -14,60 +14,72 @@ limitations under the License.
 
 <div ng-controller="HomeCtrl as home">
   <div ng-show="home.staticHome" class="box width-full home">
-    <div class="zeppelin">
-      <div class="zeppelin2"></div>
-    </div>
-    <div style="margin-top: -380px;">
-      <h1 class="box-heading" id="welcome">
-        Welcome to Synthesys Notebook!
-      </h1>
-      Notebook enables programmatic access to Synthesys API and allows writing Synthesys extensions.<br>
-      You can build notebooks with Scala/Spark, Groovy, markdown, angular, and shell.<br>
-
-      <div class="row">
-        <div class="col-md-4">
-          <h4>My Notebooks
-            <i ng-class="isReloadingNotes ? 'fa fa-refresh fa-spin' : 'fa fa-refresh'"
-              ng-style="!isReloadingNotes && {'cursor': 'pointer'}" style="font-size: 13px;"
-              ng-click="reloadNotebookList();">
-            </i>
-          </h4>
-
-          <div>
-            <h5><a href="" data-toggle="modal" data-target="#noteImportModal" style="text-decoration: none;">
-              <i style="font-size: 15px;" class="fa fa-upload"></i> Import note</a></h5>
-            <h5><a href="" data-toggle="modal" data-target="#noteNameModal" style="text-decoration: none;">
-              <i style="font-size: 15px;" class="icon-notebook"></i> Create new note</a></h5>
-            <ul style="list-style-type: none;">
-              <li ng-repeat="note in home.notes.list | filter:{ template: false } | orderBy:home.arrayOrderingSrv.notebookListOrdering track by $index">
-                <i style="font-size: 10px;" class="icon-doc"></i>
-                <a style="text-decoration: none;" href="#/notebook/{{note.id}}">{{note.name || 'Note ' + note.id}}</a>
-              </li>
-            </ul>
-          </div>
-        </div>
+    <br/>
+    <div class="row">
+      <div class="col-sm-7">
+        <h1 class="box-heading">
+          My Notebooks <i ng-class="isReloadingNotes ? 'fa fa-refresh fa-spin' : 'fa fa-refresh'"
+          ng-style="!isReloadingNotes && {'cursor': 'pointer'}" style="font-size: 13px;"
+          ng-click="reloadNotebookList();">
+        </i>
+        </h1>
+        <span class="box-subheading">Notebook enables programmatic access to Synthesys API and allows writing Synthesys extensions. You can build notebooks with Scala/Spark, Groovy, markdown, angular, and shell.
+        </span>
       </div>
-      <div class="row">
-        <div class="col-md-4">
-          <h4>Notebook Templates
-            <i ng-class="isReloadingNotes ? 'fa fa-refresh fa-spin' : 'fa fa-refresh'"
-               ng-style="!isReloadingNotes && {'cursor': 'pointer'}" style="font-size: 13px;"
-               ng-click="reloadNotebookList();">
-            </i>
-          </h4>
-
-          <div>
-            <ul style="list-style-type: none;">
-              <li ng-repeat="note in home.notes.list | filter:{template: true} | orderBy:home.arrayOrderingSrv.notebookListOrdering track by $index">
-                <i style="font-size: 10px;" class="icon-doc"></i>
-                <a style="text-decoration: none;" href="#/notebook/{{note.id}}">{{note.name || 'Note ' + note.id}}</a>
-              </li>
-            </ul>
-          </div>
-        </div>
+      <div class="col-sm-5 text-right">
+        <button data-toggle="modal" class="dr-btn primary icon create" data-target="#noteNameModal">Create Notebook</button>
+        <button data-toggle="modal" class="dr-btn default icon upload" data-target="#noteImportModal">Import Notebook</button>
       </div>
     </div>
-    <br/><br/><br/>
+    <div class="row">
+      <div class="col-md-12">
+        <!-- <pre>{{home.notes | json}}</pre> -->
+
+        <table class="dr-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr ng-repeat="note in home.notes.list | filter:{ template: false } | orderBy:home.arrayOrderingSrv.notebookListOrdering track by $index" ng-click="home.loadNotebook('/notebook/{{note.id}}')">
+              <td>
+                {{note.name || 'Note ' + note.id}}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <br/><br/>
+    <div class="row">
+      <div class="col-md-12">
+        <h1 class="box-heading">Templates
+          <i ng-class="isReloadingNotes ? 'fa fa-refresh fa-spin' : 'fa fa-refresh'"
+             ng-style="!isReloadingNotes && {'cursor': 'pointer'}" style="font-size: 13px;"
+             ng-click="reloadNotebookList();">
+          </i>
+        </h1>
+        <span class="box-subheading">Templates are sample, read-only notebooks that show how you can accomplish common tasks with the Synthesys API and extensions. Open a template and clone it to add an editable copy to My Notebooks that you can modify to suit your needs.
+        </span>
+        <div>
+          <table class="dr-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr ng-repeat="note in home.notes.list | filter:{template: true} | orderBy:home.arrayOrderingSrv.notebookListOrdering track by $index"ng-click="home.loadNotebook('/notebook/{{note.id}}')">
+                <td>
+                  {{note.name || 'Note ' + note.id}}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
   </div>
 
 
