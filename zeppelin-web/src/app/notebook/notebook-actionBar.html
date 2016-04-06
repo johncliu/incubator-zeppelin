@@ -20,7 +20,7 @@ limitations under the License.
       <button type="button"
               class="btn btn-default btn-xs"
               ng-click="runNote()"
-              ng-class="{'disabled':isNoteRunning()}"
+              ng-class="{'disabled':isNoteRunning() || note.template}"
               tooltip-placement="bottom" tooltip="Run all paragraphs">
         <i class="icon-control-play"></i>
       </button>
@@ -28,12 +28,14 @@ limitations under the License.
               class="btn btn-default btn-xs"
               ng-click="toggleAllEditor()"
               ng-hide="viewOnly"
+              ng-class="{'disabled': note.template }"
               tooltip-placement="bottom" tooltip="Show/hide the code">
         <i ng-class="editorToggled ?  'fa icon-size-fullscreen' :'fa icon-size-actual'"></i></button>
       <button type="button"
               class="btn btn-default btn-xs"
               ng-click="toggleAllTable()"
               ng-hide="viewOnly"
+              ng-class="{'disabled': note.template }"
               tooltip-placement="bottom" tooltip="Show/hide the output">
         <i ng-class="tableToggled ? 'fa icon-notebook' : 'fa icon-book-open'"></i>
       </button>
@@ -41,7 +43,7 @@ limitations under the License.
               class="btn btn-default btn-xs"
               ng-click="clearAllParagraphOutput()"
               ng-hide="viewOnly"
-              ng-class="{'disabled':isNoteRunning()}"
+              ng-class="{'disabled':isNoteRunning() || note.template}"
               tooltip-placement="bottom" tooltip="Clear output">
         <i class="fa fa-eraser"></i>
       </button>
@@ -49,6 +51,7 @@ limitations under the License.
               class="btn btn-default btn-xs"
               ng-click="removeNote(note.id)"
               ng-hide="viewOnly"
+              ng-class="{'disabled': note.template }"
               tooltip-placement="bottom" tooltip="Remove the notebook">
         <i class="icon-trash"></i>
       </button>
