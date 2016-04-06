@@ -382,7 +382,7 @@ public class SparkInterpreter extends Interpreter {
           throw new RuntimeException(e);
         }
         keyspaceLocation = fs.makeQualified(descriptorPath).toUri();
-        conf.set("spark.synthesys._keyspacedescriptors", keyspaceLocation.toString());
+        conf.set("spark.synthesys.keyspacedescriptors", keyspaceLocation.toString());
       }
     }
 
