@@ -13,7 +13,7 @@
  */
 'use strict';
 
-angular.module('zeppelinWebApp').controller('HomeCtrl', function($scope, notebookListDataFactory, websocketMsgSrv, $rootScope, arrayOrderingSrv) {
+angular.module('zeppelinWebApp').controller('HomeCtrl', function($scope, notebookListDataFactory, websocketMsgSrv, $rootScope, arrayOrderingSrv, $location) {
   
   var vm = this;
   vm.notes = notebookListDataFactory;
@@ -56,5 +56,9 @@ angular.module('zeppelinWebApp').controller('HomeCtrl', function($scope, noteboo
   $scope.reloadNotebookList = function() {
     websocketMsgSrv.reloadAllNotesFromRepo();
     $scope.isReloadingNotes = true;
+  };
+
+  vm.loadNotebook = function(path) {
+    $location.path(path);
   };
 });
