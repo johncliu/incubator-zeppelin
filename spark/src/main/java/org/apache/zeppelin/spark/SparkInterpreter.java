@@ -46,11 +46,11 @@ import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
-import com.digitalreasoning.synthesys.api.coordination.kg.KnowledgeGraphRegistry;
-import com.digitalreasoning.synthesys.api.core.SynthesysConfig;
-import com.digitalreasoning.synthesys.api.elasticsearch.ElasticsearchAccess;
-import com.digitalreasoning.synthesys.kernel.Kernel;
-import com.digitalreasoning.synthesys.kernel.plugins.Plugin;
+import synthesys.api.knowledgegraph.KnowledgeGraphAccess;
+import synthesys.api.core.SynthesysConfig;
+import synthesys.api.elasticsearch.ElasticsearchAccess;
+import synthesys.kernel.Kernel;
+import synthesys.kernel.plugins.Plugin;
 import com.google.common.base.Charsets;
 import com.google.common.base.Joiner;
 import com.google.common.io.CharStreams;
@@ -369,8 +369,8 @@ public class SparkInterpreter extends Interpreter {
         final SynthesysConfig synthesysConfig = Kernel.INSTANCE.getExtensionSystem().accessExtensionPoint(SynthesysConfig.class).select().instantiate();
         final String installRoot = synthesysConfig.getString(SynthesysConfig.HDFS_ROOT, SynthesysConfig.HDFS_ROOT_DEFAULT) + "/installed";
         hdfsInstallRoot = new Path(installRoot, "notebook-" + UUID.randomUUID().toString());
-        final KnowledgeGraphRegistry kgRegistry = Kernel.INSTANCE.getExtensionSystem().accessExtensionPoint(KnowledgeGraphRegistry.class).select().instantiate();
-        final Map<String, Supplier<? extends Reader>> keyspaceDescriptors = kgRegistry.getKnowledgeGraphTemplate().getKeyspaceDescriptors();
+        final KnowledgeGraphAccess kgRegistry = Kernel.INSTANCE.getExtensionSystem().accessExtensionPoint(KnowledgeGraphAccess.class).select().instantiate();
+        final Map<String, Supplier<? extends Reader>> keyspaceDescriptors = kgRegistry.getTemplate().getKeyspaceDescriptors();
         final Path descriptorPath = new Path(hdfsInstallRoot, "_keyspacedescriptors");
         final FileSystem fs = getFileSystem();
         try

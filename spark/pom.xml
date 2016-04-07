@@ -111,7 +111,7 @@
     </dependency>
     <dependency>
       <groupId>com.digitalreasoning.synthesys.api</groupId>
-      <artifactId>synthesys-api-coordination</artifactId>
+      <artifactId>synthesys-api-knowledgegraph</artifactId>
       <scope>provided</scope>
     </dependency>
     <dependency>
