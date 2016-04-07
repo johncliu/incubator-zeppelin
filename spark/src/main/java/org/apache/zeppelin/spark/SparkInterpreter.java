@@ -42,6 +42,7 @@ import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.*;
 import java.util.function.Supplier;
+import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -125,6 +126,7 @@ public class SparkInterpreter extends Interpreter {
   private static URI keyspaceLocation;
   private static Path hdfsInstallRoot;
   private Object installLock = new Object();
+  private static Pattern SPARK_ASSEMBLY_JAR_PATTERN = Pattern.compile("spark-assembly-.+\\.jar");
   static {
     Interpreter.register(
             "spark",
@@ -333,13 +335,21 @@ public class SparkInterpreter extends Interpreter {
       conf.set("spark.executor.uri", execUri);
     }
 
-    String sparkHome = System.getenv("SPARK_HOME");
+    java.nio.file.Path sparkDist = Kernel.INSTANCE.getPluginSystem().findPluginForClass(SparkInterpreter.class).getFileSystem().resolve("spark-dist");
+    conf.setSparkHome(sparkDist.toString());
 
-    if (sparkHome != null && !sparkHome.trim().isEmpty()) {
-      conf.setSparkHome(System.getenv("SPARK_HOME"));
+    try
+    {
+      conf.set("spark.yarn.jar", Files.walk(sparkDist.resolve("lib")).filter(file -> SPARK_ASSEMBLY_JAR_PATTERN.matcher(file.getFileName().toString()).matches()).findFirst()
+                                      .get().toString());
+    }
+    catch (IOException e)
+    {
+      throw new RuntimeException(e);
     }
 
     conf.set("spark.scheduler.mode", "FAIR");
+
 
     Properties intpProperty = getProperty();
 
@@ -387,11 +397,6 @@ public class SparkInterpreter extends Interpreter {
     }
 
     if ( conf.get("master").equals("yarn-client") ) {
-      if(sparkHome == null || sparkHome.trim().isEmpty())
-      {
-        throw new RuntimeException("SPARK_HOME must be set for yarn-client mode");
-      }
-
       final Plugin.Part thisPlugin = Kernel.INSTANCE.getPluginSystem().findPluginForClass(SparkInterpreter.class);
       final StringBuilder sparkJars = new StringBuilder();
       boolean first = true;
@@ -440,40 +445,40 @@ public class SparkInterpreter extends Interpreter {
     final ElasticsearchAccess esAccess = Kernel.INSTANCE.getExtensionSystem().accessExtensionPoint(ElasticsearchAccess.class).select().instantiate();
     conf.set("spark.es.nodes", findEsNodesConfig(esAccess));
 
-    //TODO(jongyoul): Move these codes into PySparkInterpreter.java
-    String pysparkBasePath = getSystemDefault("SPARK_HOME", null, null);
-    File pysparkPath;
-    if (null == pysparkBasePath) {
-      pysparkBasePath = getSystemDefault("ZEPPELIN_HOME", "zeppelin.home", "../");
-      pysparkPath = new File(pysparkBasePath,
-          "interpreter" + File.separator + "spark" + File.separator + "pyspark");
-    } else {
-      pysparkPath = new File(pysparkBasePath,
-          "python" + File.separator + "lib");
-    }
-
-    //Only one of py4j-0.9-src.zip and py4j-0.8.2.1-src.zip should exist
-    String[] pythonLibs = new String[]{"pyspark.zip", "py4j-0.9-src.zip", "py4j-0.8.2.1-src.zip"};
-    ArrayList<String> pythonLibUris = new ArrayList<>();
-    for (String lib : pythonLibs) {
-      File libFile = new File(pysparkPath, lib);
-      if (libFile.exists()) {
-        pythonLibUris.add(libFile.toURI().toString());
-      }
-    }
-    pythonLibUris.trimToSize();
-    if (pythonLibs.length == pythonLibUris.size()) {
-      conf.set("spark.yarn.dist.files", Joiner.on(",").join(pythonLibUris));
-      if (!useSparkSubmit()) {
-        conf.set("spark.files", conf.get("spark.yarn.dist.files"));
-      }
-      conf.set("spark.submit.pyArchives", Joiner.on(":").join(pythonLibs));
-    }
-
-    // Distributes needed libraries to workers.
-    if (getProperty("master").equals("yarn-client")) {
-      conf.set("spark.yarn.isPython", "true");
-    }
+//    //TODO(jongyoul): Move these codes into PySparkInterpreter.java
+//    String pysparkBasePath = getSystemDefault("SPARK_HOME", null, null);
+//    File pysparkPath;
+//    if (null == pysparkBasePath) {
+//      pysparkBasePath = getSystemDefault("ZEPPELIN_HOME", "zeppelin.home", "../");
+//      pysparkPath = new File(pysparkBasePath,
+//          "interpreter" + File.separator + "spark" + File.separator + "pyspark");
+//    } else {
+//      pysparkPath = new File(pysparkBasePath,
+//          "python" + File.separator + "lib");
+//    }
+//
+//    //Only one of py4j-0.9-src.zip and py4j-0.8.2.1-src.zip should exist
+//    String[] pythonLibs = new String[]{"pyspark.zip", "py4j-0.9-src.zip", "py4j-0.8.2.1-src.zip"};
+//    ArrayList<String> pythonLibUris = new ArrayList<>();
+//    for (String lib : pythonLibs) {
+//      File libFile = new File(pysparkPath, lib);
+//      if (libFile.exists()) {
+//        pythonLibUris.add(libFile.toURI().toString());
+//      }
+//    }
+//    pythonLibUris.trimToSize();
+//    if (pythonLibs.length == pythonLibUris.size()) {
+//      conf.set("spark.yarn.dist.files", Joiner.on(",").join(pythonLibUris));
+//      if (!useSparkSubmit()) {
+//        conf.set("spark.files", conf.get("spark.yarn.dist.files"));
+//      }
+//      conf.set("spark.submit.pyArchives", Joiner.on(":").join(pythonLibs));
+//    }
+//
+//    // Distributes needed libraries to workers.
+//    if (getProperty("master").equals("yarn-client")) {
+//      conf.set("spark.yarn.isPython", "true");
+//    }
 
     SparkContext sparkContext = new SparkContext(conf);
     return sparkContext;
