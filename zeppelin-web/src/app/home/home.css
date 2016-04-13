@@ -721,7 +721,7 @@ This part should be removed when new version of bootstrap handles this issue.
   transform: translate(0, -50%);
   width: 18px;
   height: 18px;
-  background-image: url('/assets/images/xml-file.svg');
+  background-image: url('/notebook/assets/images/xml-file.svg');
   background-repeat: no-repeat;
   display: block;
 }
@@ -731,5 +731,5 @@ This part should be removed when new version of bootstrap handles this issue.
   color: #263238;
 }
 .dr-table tbody tr:hover td:first-child:before {
-  background-image: url('/assets/images/xml-file-dark.svg');
+  background-image: url('/notebook/assets/images/xml-file-dark.svg');
 }
