@@ -76,10 +76,10 @@ body {
 	content: '';
 }
 .dr-btn.icon.create:before {
-	background-image: url('/assets/images/add-upload-file.svg');
+	background-image: url('../../../assets/images/add-upload-file.svg');
 }
 .dr-btn.icon.upload:before {
-	background-image: url('/assets/images/upload.svg');
+	background-image: url('../../../assets/images/upload.svg');
 }
 #noteImportModal .display-inline a.dr-fa-blue {
 	color: #2196F3 !important;
