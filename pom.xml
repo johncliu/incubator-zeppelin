@@ -223,7 +223,7 @@
       <dependency>
         <groupId>com.digitalreasoning.synthesys.api</groupId>
         <artifactId>synthesys-api-bom</artifactId>
-        <version>1.0.0-beta1</version>
+        <version>1.0.0-beta5</version>
         <type>pom</type>
         <scope>import</scope>
       </dependency>

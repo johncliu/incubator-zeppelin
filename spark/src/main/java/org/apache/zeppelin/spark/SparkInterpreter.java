@@ -31,6 +31,7 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.net.InetSocketAddress;
 import java.net.URI;
+import java.net.URISyntaxException;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.nio.file.DirectoryStream;
@@ -46,9 +47,9 @@ import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
-import synthesys.api.knowledgegraph.KnowledgeGraphAccess;
-import synthesys.api.core.SynthesysConfig;
+import scala.None$;
 import synthesys.api.elasticsearch.ElasticsearchAccess;
+import synthesys.api.spark.SparkYarnSupport;
 import synthesys.kernel.Kernel;
 import synthesys.kernel.plugins.Plugin;
 import com.google.common.base.Charsets;
@@ -122,11 +123,10 @@ import scala.tools.nsc.settings.MutableSettings.PathSetting;
  */
 public class SparkInterpreter extends Interpreter {
   Logger logger = LoggerFactory.getLogger(SparkInterpreter.class);
-  private static URI install;
-  private static URI keyspaceLocation;
-  private static Path hdfsInstallRoot;
   private Object installLock = new Object();
-  private static Pattern SPARK_ASSEMBLY_JAR_PATTERN = Pattern.compile("spark-assembly-.+\\.jar");
+  private SparkYarnSupport.SynthesysInstall synthesysInstall;
+  private static SparkYarnSupport sparkYarnSupport = Kernel.INSTANCE.getExtensionSystem().accessExtensionPoint(SparkYarnSupport.class).select().instantiate();
+
   static {
     Interpreter.register(
             "spark",
@@ -295,114 +295,85 @@ public class SparkInterpreter extends Interpreter {
   }
 
   public SparkContext createSparkContext() {
-    System.err.println("------ Create new SparkContext " + getProperty("master") + " -------");
-
-    String execUri = System.getenv("SPARK_EXECUTOR_URI");
-    String[] jars = SparkILoop.getAddedJars();
-
-    String classServerUri = null;
-
-    try { // in case of spark 1.1x, spark 1.2x
-      Method classServer = interpreter.intp().getClass().getMethod("classServer");
-      HttpServer httpServer = (HttpServer) classServer.invoke(interpreter.intp());
-      classServerUri = httpServer.uri();
-    } catch (NoSuchMethodException | SecurityException | IllegalAccessException
-        | IllegalArgumentException | InvocationTargetException e) {
-      // continue
-    }
-
-    if (classServerUri == null) {
-      try { // for spark 1.3x
-        Method classServer = interpreter.intp().getClass().getMethod("classServerUri");
-        classServerUri = (String) classServer.invoke(interpreter.intp());
-      } catch (NoSuchMethodException | SecurityException | IllegalAccessException
-          | IllegalArgumentException | InvocationTargetException e) {
-        throw new InterpreterException(e);
-      }
-    }
-
-    SparkConf conf =
-        new SparkConf()
-            .setMaster(getProperty("master"))
-            .setAppName(getProperty("spark.app.name"))
-            .set("spark.repl.class.uri", classServerUri);
-
-    if (jars.length > 0) {
-      conf.setJars(jars);
-    }
-
-    if (execUri != null) {
-      conf.set("spark.executor.uri", execUri);
-    }
-
-    java.nio.file.Path sparkDist = Kernel.INSTANCE.getPluginSystem().findPluginForClass(SparkInterpreter.class).getFileSystem().resolve("spark-dist");
-    conf.setSparkHome(sparkDist.toString());
-
+    final ClassLoader old = Thread.currentThread().getContextClassLoader();
     try
     {
-      conf.set("spark.yarn.jar", Files.walk(sparkDist.resolve("lib")).filter(file -> SPARK_ASSEMBLY_JAR_PATTERN.matcher(file.getFileName().toString()).matches()).findFirst()
-                                      .get().toString());
-    }
-    catch (IOException e)
-    {
-      throw new RuntimeException(e);
-    }
+      Thread.currentThread().setContextClassLoader(SparkConf.class.getClassLoader());
+      System.err.println("------ Create new SparkContext " + getProperty("master") + " -------");
 
-    conf.set("spark.scheduler.mode", "FAIR");
+      String execUri = System.getenv("SPARK_EXECUTOR_URI");
+      String[] jars = SparkILoop.getAddedJars();
 
+      String classServerUri = null;
 
-    Properties intpProperty = getProperty();
-
-    for (Object k : intpProperty.keySet()) {
-      String key = (String) k;
-      String val = toString(intpProperty.get(key));
-      if (!key.startsWith("spark.") || !val.trim().isEmpty()) {
-        logger.debug(String.format("SparkConf: key = [%s], value = [%s]", key, val));
-        conf.set(key, val);
+      try { // in case of spark 1.1x, spark 1.2x
+        Method classServer = interpreter.intp().getClass().getMethod("classServer");
+        HttpServer httpServer = (HttpServer) classServer.invoke(interpreter.intp());
+        classServerUri = httpServer.uri();
+      } catch (NoSuchMethodException | SecurityException | IllegalAccessException
+              | IllegalArgumentException | InvocationTargetException e) {
+        // continue
       }
-    }
 
-    synchronized (installLock)
-    {
-      if(keyspaceLocation == null)
-      {
-        final SynthesysConfig synthesysConfig = Kernel.INSTANCE.getExtensionSystem().accessExtensionPoint(SynthesysConfig.class).select().instantiate();
-        final String installRoot = synthesysConfig.getString(SynthesysConfig.HDFS_ROOT, SynthesysConfig.HDFS_ROOT_DEFAULT) + "/installed";
-        hdfsInstallRoot = new Path(installRoot, "notebook-" + UUID.randomUUID().toString());
-        final KnowledgeGraphAccess kgRegistry = Kernel.INSTANCE.getExtensionSystem().accessExtensionPoint(KnowledgeGraphAccess.class).select().instantiate();
-        final Map<String, Supplier<? extends Reader>> keyspaceDescriptors = kgRegistry.getTemplate().getKeyspaceDescriptors();
-        final Path descriptorPath = new Path(hdfsInstallRoot, "_keyspacedescriptors");
-        final FileSystem fs = getFileSystem();
-        try
-        {
-          for (String name : keyspaceDescriptors.keySet())
-          {
-            final Path descriptorFilePath = new Path(descriptorPath, name + "-descriptor.xml");
-            if(!fs.exists(descriptorFilePath))
-            {
-              try(Writer descriptorWriter = new OutputStreamWriter(fs.create(descriptorFilePath, true), Charsets.UTF_8);
-                  Reader reader = keyspaceDescriptors.get(name).get())
-              {
-                CharStreams.copy(reader, descriptorWriter);
-              }
-            }
-          }
-        }catch (IOException e)
-        {
-          throw new RuntimeException(e);
+      if (classServerUri == null) {
+        try { // for spark 1.3x
+          Method classServer = interpreter.intp().getClass().getMethod("classServerUri");
+          classServerUri = (String) classServer.invoke(interpreter.intp());
+        } catch (NoSuchMethodException | SecurityException | IllegalAccessException
+                | IllegalArgumentException | InvocationTargetException e) {
+          throw new InterpreterException(e);
         }
-        keyspaceLocation = fs.makeQualified(descriptorPath).toUri();
-        conf.set("spark.synthesys.keyspacedescriptors", keyspaceLocation.toString());
       }
-    }
 
-    if ( conf.get("master").equals("yarn-client") ) {
-      final Plugin.Part thisPlugin = Kernel.INSTANCE.getPluginSystem().findPluginForClass(SparkInterpreter.class);
-      final StringBuilder sparkJars = new StringBuilder();
-      boolean first = true;
-      try(DirectoryStream<java.nio.file.Path> directoryStream = Files.newDirectoryStream(thisPlugin.getFileSystem().resolve("spark-libs")))
+      SparkConf conf =
+              new SparkConf()
+                      .setMaster(getProperty("master"))
+                      .setAppName(getProperty("spark.app.name"))
+                      .set("spark.repl.class.uri", classServerUri);
+
+      if (jars.length > 0) {
+        conf.setJars(jars);
+      }
+
+      if (execUri != null) {
+        conf.set("spark.executor.uri", execUri);
+      }
+
+      conf.setSparkHome(sparkYarnSupport.getSparkHome().toString());
+
+      conf.set("spark.yarn.jar", sparkYarnSupport.getSparkJar().toString());
+
+      conf.set("spark.scheduler.mode", "FAIR");
+      final Plugin.Part pluginForClass = Kernel.INSTANCE.getPluginSystem().findPluginForClass(SparkInterpreter.class);
+      final String pluginName = pluginForClass.getPlugin().getName() + "." + pluginForClass.getName();
+      conf.set("spark.executor.extraJavaOptions", "-Dsynthesys.plugin.name=" + pluginName);
+      conf.set("spark.driver.extraJavaOptions", "-Dsynthesys.plugin.name=" + pluginName);
+
+      Properties intpProperty = getProperty();
+
+      for (Object k : intpProperty.keySet()) {
+        String key = (String) k;
+        String val = toString(intpProperty.get(key));
+        if (!key.startsWith("spark.") || !val.trim().isEmpty()) {
+          logger.debug(String.format("SparkConf: key = [%s], value = [%s]", key, val));
+          conf.set(key, val);
+        }
+      }
+
+      synchronized (installLock)
       {
-        for(java.nio.file.Path sparkLib : directoryStream)
+        if(synthesysInstall == null)
+        {
+          synthesysInstall = sparkYarnSupport.installSynthesysToHdfs();
+        }
+      }
+
+      conf.set("spark.synthesys.keyspacedescriptors", new Path(synthesysInstall.getInstallRoot(), "_keyspacedescriptors").toUri().toString());
+
+      if ( conf.get("master").equals("yarn-client") ) {
+        final StringBuilder sparkJars = new StringBuilder();
+        boolean first = true;
+        for(URL sparkLib : sparkYarnSupport.getSynthesysSparkKernelJars())
         {
           if(!first)
           {
@@ -414,36 +385,12 @@ public class SparkInterpreter extends Interpreter {
           }
           sparkJars.append(sparkLib.toString());
         }
-      }
-      catch (IOException e)
-      {
-        throw new RuntimeException(e);
+        conf.set("spark.jars", sparkJars.toString());
+        conf.set("spark.archives", synthesysInstall.getSynthesysArchiveLocation().toUri().toString());
       }
 
-      conf.set("spark.jars", sparkJars.toString());
-
-      final java.nio.file.Path synthesysHome = Kernel.INSTANCE.getLocations().lookupHome();
-        try {
-
-          synchronized (installLock)
-          {
-            if(install == null)
-            {
-              final Path synthesysArchiveLocation = new Path(hdfsInstallRoot, "synthesys.zip");
-              install(synthesysHome, synthesysArchiveLocation);
-            }
-          }
-          System.out.println(install);
-          conf.set("spark.archives", install.toString());
-        }
-        catch ( IOException e )
-        {
-          throw new RuntimeException(e);
-        }
-    }
-
-    final ElasticsearchAccess esAccess = Kernel.INSTANCE.getExtensionSystem().accessExtensionPoint(ElasticsearchAccess.class).select().instantiate();
-    conf.set("spark.es.nodes", findEsNodesConfig(esAccess));
+      final ElasticsearchAccess esAccess = Kernel.INSTANCE.getExtensionSystem().accessExtensionPoint(ElasticsearchAccess.class).select().instantiate();
+      conf.set("spark.es.nodes", findEsNodesConfig(esAccess));
 
 //    //TODO(jongyoul): Move these codes into PySparkInterpreter.java
 //    String pysparkBasePath = getSystemDefault("SPARK_HOME", null, null);
@@ -480,8 +427,12 @@ public class SparkInterpreter extends Interpreter {
 //      conf.set("spark.yarn.isPython", "true");
 //    }
 
-    SparkContext sparkContext = new SparkContext(conf);
-    return sparkContext;
+      return new SparkContext(conf);
+    }
+    finally
+    {
+      Thread.currentThread().setContextClassLoader(old);
+    }
   }
 
   private static String findEsNodesConfig(final ElasticsearchAccess elasticsearchAccess)
@@ -510,75 +461,6 @@ public class SparkInterpreter extends Interpreter {
       }
     }
     return esNodes.toString();
-  }
-
-  public static FileSystem getFileSystem()
-  {
-    final ClassLoader old = Thread.currentThread().getContextClassLoader();
-    try {
-      Thread.currentThread().setContextClassLoader(Configuration.class.getClassLoader());
-      return FileSystem.get(new Configuration());
-    }
-    catch (IOException e)
-    {
-      throw new RuntimeException(e);
-    }
-    finally {
-      Thread.currentThread().setContextClassLoader(old);
-    }
-  }
-  public static void install(final java.nio.file.Path home,
-                             final Path synthesysArchiveLocation) throws IOException {
-      final FileSystem fs = getFileSystem();
-
-      final FSDataOutputStream synthesysArchive = fs.create(synthesysArchiveLocation);
-      final ZipOutputStream zos = new ZipOutputStream(synthesysArchive);
-      zos.setMethod(ZipOutputStream.DEFLATED);
-      zos.setLevel(0);
-
-      try
-      {
-        for (final String subdir : Arrays.asList("api", "plugins") )
-        {
-          Files.walkFileTree(home.resolve(subdir), Collections.<FileVisitOption>emptySet(),
-                             Integer.MAX_VALUE, new SimpleFileVisitor<java.nio.file.Path>()
-          {
-              @Override
-              public FileVisitResult preVisitDirectory(final java.nio.file.Path dir,
-                                                       final BasicFileAttributes attrs)
-                      throws IOException {
-                if (dir.getFileName().toString().equals("elasticsearch")) {
-                  return FileVisitResult.SKIP_SUBTREE;
-                }
-                return FileVisitResult.CONTINUE;
-              }
-
-              @Override
-              public FileVisitResult visitFile(final java.nio.file.Path file,
-                                               final BasicFileAttributes attrs)
-                      throws IOException {
-                if (Files.isRegularFile(file))
-                {
-                  final String relative = home.relativize(file).toString();
-                  zos.putNextEntry(new ZipEntry(relative));
-
-                  try (FileInputStream entryIs = new FileInputStream(file.toFile()))
-                  {
-                    IOUtils.copy(entryIs, zos);
-                  }
-                  zos.closeEntry();
-                }
-                return FileVisitResult.CONTINUE;
-              }
-          });
-        }
-        install = fs.makeQualified(synthesysArchiveLocation).toUri();
-      }
-      finally
-      {
-        zos.close();
-        synthesysArchive.close();
-      }
   }
 
   static final String toString(Object o) {
@@ -612,10 +494,14 @@ public class SparkInterpreter extends Interpreter {
 
   @Override
   public void open() {
-    URL[] urls = getClassloaderUrls();
+    final ClassLoader old = Thread.currentThread().getContextClassLoader();
+    try
+    {
+      Thread.currentThread().setContextClassLoader(SparkConf.class.getClassLoader());
+//      URL[] urls = getClassloaderUrls();
 
-    // Very nice discussion about how scala compiler handle classpath
-    // https://groups.google.com/forum/#!topic/scala-user/MlVwo2xCCI0
+      // Very nice discussion about how scala compiler handle classpath
+      // https://groups.google.com/forum/#!topic/scala-user/MlVwo2xCCI0
 
     /*
      * > val env = new nsc.Settings(errLogger) > env.usejavacp.value = true > val p = new
@@ -627,124 +513,127 @@ public class SparkInterpreter extends Interpreter {
      * val in = new Interpreter(settings) { >> override protected def parentClassLoader =
      * getClass.getClassLoader >> } >> in.setContextClassLoader()
      */
-    Settings settings = new Settings();
-    if (getProperty("args") != null) {
-      String[] argsArray = getProperty("args").split(" ");
-      LinkedList<String> argList = new LinkedList<String>();
-      for (String arg : argsArray) {
-        argList.add(arg);
+      Settings settings = new Settings();
+      if (getProperty("args") != null) {
+        String[] argsArray = getProperty("args").split(" ");
+        LinkedList<String> argList = new LinkedList<String>();
+        for (String arg : argsArray) {
+          argList.add(arg);
+        }
+
+        SparkCommandLine command =
+                new SparkCommandLine(scala.collection.JavaConversions.asScalaBuffer(
+                        argList).toList());
+        settings = command.settings();
       }
 
-      SparkCommandLine command =
-          new SparkCommandLine(scala.collection.JavaConversions.asScalaBuffer(
-              argList).toList());
-      settings = command.settings();
-    }
-
-    // set classpath for scala compiler
-    PathSetting pathSettings = settings.classpath();
-    String classpath = "";
-    List<File> paths = currentClassPath();
-    for (File f : paths) {
-      if (classpath.length() > 0) {
-        classpath += File.pathSeparator;
-      }
-      classpath += f.getAbsolutePath();
-    }
-
-    if (urls != null) {
-      for (URL u : urls) {
+      // set classpath for scala compiler
+      PathSetting pathSettings = settings.classpath();
+      String classpath = "";
+      List<File> paths = currentClassPath();
+      for (File f : paths) {
         if (classpath.length() > 0) {
           classpath += File.pathSeparator;
         }
-        classpath += u.getFile();
+        classpath += f.getAbsolutePath();
       }
-    }
 
-    // add dependency from DepInterpreter
-    DepInterpreter depInterpreter = getDepInterpreter();
-    if (depInterpreter != null) {
-      DependencyContext depc = depInterpreter.getDependencyContext();
-      if (depc != null) {
-        List<File> files = depc.getFiles();
-        if (files != null) {
-          for (File f : files) {
-            if (classpath.length() > 0) {
-              classpath += File.pathSeparator;
-            }
-            classpath += f.getAbsolutePath();
-          }
-        }
-      }
-    }
+//      if (urls != null) {
+//        for (URL u : urls) {
+//          if (classpath.length() > 0) {
+//            classpath += File.pathSeparator;
+//          }
+//          classpath += u.getFile();
+//        }
+//      }
 
-    pathSettings.v_$eq(classpath);
-    settings.scala$tools$nsc$settings$ScalaSettings$_setter_$classpath_$eq(pathSettings);
+//      // add dependency from DepInterpreter
+//      DepInterpreter depInterpreter = getDepInterpreter();
+//      if (depInterpreter != null) {
+//        DependencyContext depc = depInterpreter.getDependencyContext();
+//        if (depc != null) {
+//          List<File> files = depc.getFiles();
+//          if (files != null) {
+//            for (File f : files) {
+//              if (classpath.length() > 0) {
+//                classpath += File.pathSeparator;
+//              }
+//              classpath += f.getAbsolutePath();
+//            }
+//          }
+//        }
+//      }
+      classpath += File.pathSeparator;
+      classpath += sparkYarnSupport.getSparkJar().toString();
+      pathSettings.v_$eq(classpath);
+      settings.scala$tools$nsc$settings$ScalaSettings$_setter_$classpath_$eq(pathSettings);
 
 
-    // set classloader for scala compiler
-    settings.explicitParentLoader_$eq(new Some<ClassLoader>(SparkInterpreter.class
-        .getClassLoader()));
-    BooleanSetting b = (BooleanSetting) settings.usejavacp();
-    b.v_$eq(true);
-    settings.scala$tools$nsc$settings$StandardScalaSettings$_setter_$usejavacp_$eq(b);
+      // set classloader for scala compiler
+      System.out.println(SparkInterpreter.class.getClassLoader());
+      System.out.println(SparkConf.class.getClassLoader());
+      settings.explicitParentLoader_$eq(new Some<>(SparkInterpreter.class
+                                                           .getClassLoader()));
+//      BooleanSetting b = (BooleanSetting) settings.usejavacp();
+//      b.v_$eq(true);
+//      settings.scala$tools$nsc$settings$StandardScalaSettings$_setter_$usejavacp_$eq(b);
 
-    PrintStream printStream = new PrintStream(out);
+      PrintStream printStream = new PrintStream(out);
 
     /* spark interpreter */
-    this.interpreter = new SparkILoop(null, new PrintWriter(out));
-    interpreter.settings_$eq(settings);
+      this.interpreter = new SparkILoop(null, new PrintWriter(out));
+      interpreter.settings_$eq(settings);
 
-    interpreter.createInterpreter();
+      interpreter.createInterpreter();
 
-    intp = interpreter.intp();
-    intp.setContextClassLoader();
-    intp.initializeSynchronous();
+      intp = interpreter.intp();
+      intp.setContextClassLoader();
+      intp.initializeSynchronous();
 
-    completor = new SparkJLineCompletion(intp);
+      completor = new SparkJLineCompletion(intp);
 
-    sc = getSparkContext();
-    if (sc.getPoolForName("fair").isEmpty()) {
-      Value schedulingMode = org.apache.spark.scheduler.SchedulingMode.FAIR();
-      int minimumShare = 0;
-      int weight = 1;
-      Pool pool = new Pool("fair", schedulingMode, minimumShare, weight);
-      sc.taskScheduler().rootPool().addSchedulable(pool);
-    }
+      sc = getSparkContext();
+      if (sc.getPoolForName("fair").isEmpty()) {
+        Value schedulingMode = org.apache.spark.scheduler.SchedulingMode.FAIR();
+        int minimumShare = 0;
+        int weight = 1;
+        Pool pool = new Pool("fair", schedulingMode, minimumShare, weight);
+        sc.taskScheduler().rootPool().addSchedulable(pool);
+      }
 
-    sparkVersion = SparkVersion.fromVersionString(sc.version());
+      sparkVersion = SparkVersion.fromVersionString(sc.version());
 
-    sqlc = getSQLContext();
+      sqlc = getSQLContext();
 
-    dep = getDependencyResolver();
+      dep = getDependencyResolver();
 
-    z = new ZeppelinContext(sc, sqlc, null, dep, printStream,
-        Integer.parseInt(getProperty("zeppelin.spark.maxResult")));
+      z = new ZeppelinContext(sc, sqlc, null, dep, printStream,
+                              Integer.parseInt(getProperty("zeppelin.spark.maxResult")));
 
-    intp.interpret("@transient var _binder = new java.util.HashMap[String, Object]()");
-    binder = (Map<String, Object>) getValue("_binder");
-    binder.put("sc", sc);
-    binder.put("sqlc", sqlc);
-    binder.put("z", z);
-    binder.put("out", printStream);
+      intp.interpret("@transient var _binder = new java.util.HashMap[String, Object]()");
+      binder = (Map<String, Object>) getValue("_binder");
+      binder.put("sc", sc);
+      binder.put("sqlc", sqlc);
+      binder.put("z", z);
+      binder.put("out", printStream);
 
-    intp.interpret("@transient val z = "
-                 + "_binder.get(\"z\").asInstanceOf[org.apache.zeppelin.spark.ZeppelinContext]");
-    intp.interpret("@transient val sc = "
-                 + "_binder.get(\"sc\").asInstanceOf[org.apache.spark.SparkContext]");
-    intp.interpret("@transient val sqlc = "
-                 + "_binder.get(\"sqlc\").asInstanceOf[org.apache.spark.sql.SQLContext]");
-    intp.interpret("@transient val sqlContext = "
-                 + "_binder.get(\"sqlc\").asInstanceOf[org.apache.spark.sql.SQLContext]");
-    intp.interpret("import org.apache.spark.SparkContext._");
+      intp.interpret("@transient val z = "
+                     + "_binder.get(\"z\").asInstanceOf[org.apache.zeppelin.spark.ZeppelinContext]");
+      intp.interpret("@transient val sc = "
+                     + "_binder.get(\"sc\").asInstanceOf[org.apache.spark.SparkContext]");
+      intp.interpret("@transient val sqlc = "
+                     + "_binder.get(\"sqlc\").asInstanceOf[org.apache.spark.sql.SQLContext]");
+      intp.interpret("@transient val sqlContext = "
+                     + "_binder.get(\"sqlc\").asInstanceOf[org.apache.spark.sql.SQLContext]");
+      intp.interpret("import org.apache.spark.SparkContext._");
 
-    if (sparkVersion.oldSqlContextImplicits()) {
-      intp.interpret("import sqlContext._");
-    } else {
-      intp.interpret("import sqlContext.implicits._");
-      intp.interpret("import sqlContext.sql");
-      intp.interpret("import org.apache.spark.sql.functions._");
-    }
+      if (sparkVersion.oldSqlContextImplicits()) {
+        intp.interpret("import sqlContext._");
+      } else {
+        intp.interpret("import sqlContext.implicits._");
+        intp.interpret("import sqlContext.sql");
+        intp.interpret("import org.apache.spark.sql.functions._");
+      }
 
     /* Temporary disabling DisplayUtils. see https://issues.apache.org/jira/browse/ZEPPELIN-127
      *
@@ -757,37 +646,42 @@ public class SparkInterpreter extends Interpreter {
             Integer.parseInt(getProperty("zeppelin.spark.maxResult")) + ")");
      */
 
-    try {
-      if (sparkVersion.oldLoadFilesMethodName()) {
-        Method loadFiles = this.interpreter.getClass().getMethod("loadFiles", Settings.class);
-        loadFiles.invoke(this.interpreter, settings);
-      } else {
-        Method loadFiles = this.interpreter.getClass().getMethod(
-                "org$apache$spark$repl$SparkILoop$$loadFiles", Settings.class);
-        loadFiles.invoke(this.interpreter, settings);
-      }
-    } catch (NoSuchMethodException | SecurityException | IllegalAccessException
-            | IllegalArgumentException | InvocationTargetException e) {
-      throw new InterpreterException(e);
-    }
-
-    // add jar
-    if (depInterpreter != null) {
-      DependencyContext depc = depInterpreter.getDependencyContext();
-      if (depc != null) {
-        List<File> files = depc.getFilesDist();
-        if (files != null) {
-          for (File f : files) {
-            if (f.getName().toLowerCase().endsWith(".jar")) {
-              sc.addJar(f.getAbsolutePath());
-              logger.info("sc.addJar(" + f.getAbsolutePath() + ")");
-            } else {
-              sc.addFile(f.getAbsolutePath());
-              logger.info("sc.addFile(" + f.getAbsolutePath() + ")");
-            }
-          }
+      try {
+        if (sparkVersion.oldLoadFilesMethodName()) {
+          Method loadFiles = this.interpreter.getClass().getMethod("loadFiles", Settings.class);
+          loadFiles.invoke(this.interpreter, settings);
+        } else {
+          Method loadFiles = this.interpreter.getClass().getMethod(
+                  "org$apache$spark$repl$SparkILoop$$loadFiles", Settings.class);
+          loadFiles.invoke(this.interpreter, settings);
         }
+      } catch (NoSuchMethodException | SecurityException | IllegalAccessException
+              | IllegalArgumentException | InvocationTargetException e) {
+        throw new InterpreterException(e);
       }
+
+//      // add jar
+//      if (depInterpreter != null) {
+//        DependencyContext depc = depInterpreter.getDependencyContext();
+//        if (depc != null) {
+//          List<File> files = depc.getFilesDist();
+//          if (files != null) {
+//            for (File f : files) {
+//              if (f.getName().toLowerCase().endsWith(".jar")) {
+//                sc.addJar(f.getAbsolutePath());
+//                logger.info("sc.addJar(" + f.getAbsolutePath() + ")");
+//              } else {
+//                sc.addFile(f.getAbsolutePath());
+//                logger.info("sc.addFile(" + f.getAbsolutePath() + ")");
+//              }
+//            }
+//          }
+//        }
+//      }
+    }
+    finally
+    {
+      Thread.currentThread().setContextClassLoader(old);
     }
   }
 
