@@ -133,7 +133,7 @@ public class SparkInterpreter extends Interpreter {
             "spark",
             SparkInterpreter.class.getName(),
             new InterpreterPropertyBuilder()
-                    .add("spark.app.name", "Zeppelin", "The name of spark application.")
+                    .add("spark.app.name", "Synthesys Notebook", "The name of spark application.")
                     .add("master",
                          getSystemDefault("MASTER", "spark.master", "yarn-client"),
                          "Spark master uri. ex) spark://masterhost:7077")
