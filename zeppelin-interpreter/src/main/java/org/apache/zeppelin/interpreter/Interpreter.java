@@ -270,7 +270,7 @@ public abstract class Interpreter {
 
   public static void register(String name, String group, String className,
       Map<String, InterpreterProperty> properties) {
-    registeredInterpreters.put(group + "." + name, new RegisteredInterpreter(
+    registeredInterpreters.put(name, new RegisteredInterpreter(
         name, group, className, properties));
   }
 
