@@ -88,58 +88,17 @@ public class NoteInterpreterLoader {
       return null;
     }
 
-    String[] replNameSplit = replName.split("\\.");
-    String group = null;
-    String name = null;
-    if (replNameSplit.length == 2) {
-      group = replNameSplit[0];
-      name = replNameSplit[1];
+    Interpreter.RegisteredInterpreter registeredInterpreter = Interpreter.registeredInterpreters.get(replName);
+    if (registeredInterpreter == null
+        || registeredInterpreter.getClassName() == null) {
+      throw new InterpreterException(replName + " interpreter not found");
+    }
+    String interpreterClassName = registeredInterpreter.getClassName();
 
-      Interpreter.RegisteredInterpreter registeredInterpreter = Interpreter.registeredInterpreters
-          .get(group + "." + name);
-      if (registeredInterpreter == null
-          || registeredInterpreter.getClassName() == null) {
-        throw new InterpreterException(replName + " interpreter not found");
-      }
-      String interpreterClassName = registeredInterpreter.getClassName();
-
-      for (InterpreterSetting setting : settings) {
-        InterpreterGroup intpGroup = setting.getInterpreterGroup();
-        for (Interpreter interpreter : intpGroup) {
-          if (interpreterClassName.equals(interpreter.getClassName())) {
-            return interpreter;
-          }
-        }
-      }
-    } else {
-      // first assume replName is 'name' of interpreter. ('groupName' is ommitted)
-      // search 'name' from first (default) interpreter group
-      InterpreterGroup intpGroup = settings.get(0).getInterpreterGroup();
+    for (InterpreterSetting setting : settings) {
+      InterpreterGroup intpGroup = setting.getInterpreterGroup();
       for (Interpreter interpreter : intpGroup) {
-        RegisteredInterpreter intp = Interpreter
-            .findRegisteredInterpreterByClassName(interpreter.getClassName());
-        if (intp == null) {
-          continue;
-        }
-
-        if (intp.getName().equals(replName)) {
-          return interpreter;
-        }
-      }
-
-
-      // next, assume replName is 'group' of interpreter ('name' is ommitted)
-      // search interpreter group and return first interpreter.
-      for (InterpreterSetting setting : settings) {
-        intpGroup = setting.getInterpreterGroup();
-        Interpreter interpreter = intpGroup.get(0);
-        RegisteredInterpreter intp = Interpreter
-            .findRegisteredInterpreterByClassName(interpreter.getClassName());
-        if (intp == null) {
-          continue;
-        }
-
-        if (intp.getGroup().equals(replName)) {
+        if (interpreterClassName.equals(interpreter.getClassName())) {
           return interpreter;
         }
       }
