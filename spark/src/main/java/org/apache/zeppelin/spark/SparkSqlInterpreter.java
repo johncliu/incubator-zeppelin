@@ -48,8 +48,8 @@ public class SparkSqlInterpreter extends Interpreter {
 
   static {
     Interpreter.register(
-        "sql",
-        "spark",
+        "sparksql",
+        "synth",
         SparkSqlInterpreter.class.getName(),
         new InterpreterPropertyBuilder()
             .add("zeppelin.spark.maxResult",
