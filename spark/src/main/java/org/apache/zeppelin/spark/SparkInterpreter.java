@@ -48,6 +48,7 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
 import scala.None$;
+import synthesys.api.elasticsearch.ClusterDetails;
 import synthesys.api.elasticsearch.ElasticsearchAccess;
 import synthesys.api.spark.SparkYarnSupport;
 import synthesys.kernel.Kernel;
@@ -389,8 +390,8 @@ public class SparkInterpreter extends Interpreter {
         conf.set("spark.archives", synthesysInstall.getSynthesysArchiveLocation().toUri().toString());
       }
 
-      final ElasticsearchAccess esAccess = Kernel.INSTANCE.getExtensionSystem().accessExtensionPoint(ElasticsearchAccess.class).select().instantiate();
-      conf.set("spark.es.nodes", findEsNodesConfig(esAccess));
+
+      addElasticsearchConfig(conf);
 
 //    //TODO(jongyoul): Move these codes into PySparkInterpreter.java
 //    String pysparkBasePath = getSystemDefault("SPARK_HOME", null, null);
@@ -433,6 +434,77 @@ public class SparkInterpreter extends Interpreter {
     {
       Thread.currentThread().setContextClassLoader(old);
     }
+  }
+
+  private void addElasticsearchConfig(final SparkConf conf)
+  {
+    final ElasticsearchAccess esAccess = ElasticsearchAccess.load();
+    final ClusterDetails clusterDetails = esAccess.findClusterDetails();
+    conf.set(getSparkEsConfigKey("es.net.ssl"), Boolean.toString(clusterDetails.isHttpSSL()));
+    conf.set(getSparkEsConfigKey("es.net.ssl.cert.allow.self.signed"), Boolean.toString(true));
+    if (clusterDetails.getUsername() != null)
+    {
+      conf.set(getSparkEsConfigKey("es.net.http.auth.user"), clusterDetails.getUsername());
+    }
+    if (clusterDetails.getPassword() != null)
+    {
+      conf.set(getSparkEsConfigKey("es.net.http.auth.pass"), new String(clusterDetails.getPassword()));
+    }
+    final java.nio.file.Path keystore = clusterDetails.getKeystore();
+    final java.nio.file.Path truststore = clusterDetails.getTruststore();
+    if (keystore != null)
+    {
+      if (!Files.exists(keystore))
+      {
+        throw new IllegalArgumentException("Could not locate keystore at " + keystore);
+      }
+      if (!Files.isReadable(keystore))
+      {
+        throw new IllegalArgumentException("Keystore at " + truststore + " was not a readable file");
+      }
+      System.err.println("Keystore is readable at " + keystore);
+      conf.set(getSparkEsConfigKey("es.net.ssl.keystore.location"), normalizeKeystoreLocation(keystore));
+    }
+    if (clusterDetails.getKeystorePassword() != null)
+    {
+      conf.set(getSparkEsConfigKey("es.net.ssl.keystore.pass"), new String(clusterDetails.getKeystorePassword()));
+    }
+    if (truststore != null)
+    {
+      if (!Files.exists(truststore))
+      {
+        throw new IllegalArgumentException("Could not locate truststore at " + truststore);
+      }
+      if (!Files.isReadable(truststore))
+      {
+        throw new IllegalArgumentException("Truststore at " + truststore + " was not a readable file");
+
+      }
+      System.err.println("Truststore is readable at " + truststore);
+      conf.set(getSparkEsConfigKey("es.net.ssl.truststore.location"), normalizeKeystoreLocation(truststore));
+    }
+    else if (keystore != null)
+    {
+      conf.set(getSparkEsConfigKey("es.net.ssl.truststore.location"), normalizeKeystoreLocation(keystore));
+    }
+    if (clusterDetails.getTruststorePassword() != null)
+    {
+      conf.set(getSparkEsConfigKey("es.net.ssl.truststore.pass"), new String(clusterDetails.getTruststorePassword()));
+    }
+    else if (clusterDetails.getKeystorePassword() != null)
+    {
+      conf.set(getSparkEsConfigKey("es.net.ssl.truststore.pass"), new String(clusterDetails.getKeystorePassword()));
+    }
+    conf.set(getSparkEsConfigKey("es.nodes"), findEsNodesConfig(esAccess));
+  }
+
+  private static String getSparkEsConfigKey(final String esConfigKey)
+  {
+    return "spark." + esConfigKey;
+  }
+  private static String normalizeKeystoreLocation(java.nio.file.Path location)
+  {
+    return "./synthesys.zip/elasticsearch/config/" + location.getFileName();
   }
 
   private static String findEsNodesConfig(final ElasticsearchAccess elasticsearchAccess)
