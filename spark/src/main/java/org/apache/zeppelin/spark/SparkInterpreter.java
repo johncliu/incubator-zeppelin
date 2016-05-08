@@ -53,9 +53,6 @@ import synthesys.api.elasticsearch.ElasticsearchAccess;
 import synthesys.api.spark.SparkYarnSupport;
 import synthesys.kernel.Kernel;
 import synthesys.kernel.plugins.Plugin;
-import com.google.common.base.Charsets;
-import com.google.common.base.Joiner;
-import com.google.common.io.CharStreams;
 
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.IOUtils;
@@ -515,7 +512,7 @@ public class SparkInterpreter extends Interpreter {
     final ClusterAdminClient cluster = es.admin().cluster();
     final ActionFuture<ClusterStateResponse> future = cluster.state(cluster.prepareState().all().request());
     final ClusterStateResponse clusterStateResponse = future.actionGet();
-    final DiscoveryNodes nodes = clusterStateResponse.getState().getNodes();
+    final Iterable<DiscoveryNode> nodes = clusterStateResponse.getState().getNodes();
     for (DiscoveryNode dNode: nodes)
     {
       if (!dNode.clientNode())
