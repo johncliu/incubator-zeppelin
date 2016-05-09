@@ -755,18 +755,14 @@ public class SparkInterpreter extends Interpreter {
   }
 
   private List<File> currentClassPath() {
-    List<File> paths = classPath(SparkInterpreter.class.getClassLoader());
+    List<File> paths = new ArrayList<>();
+
     String[] cps = System.getProperty("java.class.path").split(File.pathSeparator);
     if (cps != null) {
       for (String cp : cps) {
         paths.add(new File(cp));
       }
     }
-    return paths;
-  }
-
-  private List<File> classPath(ClassLoader cl) {
-    List<File> paths = new LinkedList<>();
     File synthesysApi = Kernel.INSTANCE.getLocations().lookupHome().resolve("api").toFile();
     if (synthesysApi.exists())
     {
@@ -775,7 +771,14 @@ public class SparkInterpreter extends Interpreter {
         paths.add(jar);
       }
     }
+    paths.addAll(classPath(SparkInterpreter.class.getClassLoader()));
+    paths.addAll(classPath(Configuration.class.getClassLoader()));
+    return paths;
+  }
 
+  private List<File> classPath(ClassLoader cl)
+  {
+    List<File> paths = new LinkedList<>();
     if (cl instanceof URLClassLoader)
     {
       URLClassLoader ucl = (URLClassLoader) cl;
