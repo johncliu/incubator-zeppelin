@@ -339,13 +339,7 @@ public class SparkInterpreter extends Interpreter {
 
       conf.setSparkHome(sparkYarnSupport.getSparkHome().toString());
 
-      conf.set("spark.yarn.jar", sparkYarnSupport.getSparkJar().toString());
-
       conf.set("spark.scheduler.mode", "FAIR");
-      final Plugin.Part pluginForClass = Kernel.INSTANCE.getPluginSystem().findPluginForClass(SparkInterpreter.class);
-      final String pluginName = pluginForClass.getPlugin().getName() + "." + pluginForClass.getName();
-      conf.set("spark.executor.extraJavaOptions", "-Dsynthesys.plugin.name=" + pluginName);
-      conf.set("spark.driver.extraJavaOptions", "-Dsynthesys.plugin.name=" + pluginName);
 
       Properties intpProperty = getProperty();
 
@@ -358,17 +352,25 @@ public class SparkInterpreter extends Interpreter {
         }
       }
 
-      synchronized (installLock)
+
+      if(conf.get("master").equals("yarn-client"))
       {
-        if(synthesysInstall == null)
+        synchronized (installLock)
         {
-          synthesysInstall = sparkYarnSupport.installSynthesysToHdfs();
+          if(synthesysInstall == null)
+          {
+            synthesysInstall = sparkYarnSupport.installSynthesysToHdfs();
+          }
         }
-      }
+        conf.set("spark.yarn.jar", sparkYarnSupport.getSparkJar().toString());
 
-      conf.set("spark.synthesys.keyspacedescriptors", new Path(synthesysInstall.getInstallRoot(), "_keyspacedescriptors").toUri().toString());
 
-      if ( conf.get("master").equals("yarn-client") ) {
+        final Plugin.Part pluginForClass = Kernel.INSTANCE.getPluginSystem().findPluginForClass(SparkInterpreter.class);
+        final String pluginName = pluginForClass.getPlugin().getName() + "." + pluginForClass.getName();
+        conf.set("spark.executor.extraJavaOptions", "-Dsynthesys.plugin.name=" + pluginName);
+        conf.set("spark.driver.extraJavaOptions", "-Dsynthesys.plugin.name=" + pluginName);
+
+        conf.set("spark.synthesys.keyspacedescriptors", new Path(synthesysInstall.getInstallRoot(), "_keyspacedescriptors").toUri().toString());
         final StringBuilder sparkJars = new StringBuilder();
         boolean first = true;
         for(URL sparkLib : sparkYarnSupport.getSynthesysSparkKernelJars())
@@ -386,7 +388,6 @@ public class SparkInterpreter extends Interpreter {
         conf.set("spark.jars", sparkJars.toString());
         conf.set("spark.archives", synthesysInstall.getSynthesysArchiveLocation().toUri().toString());
       }
-
 
       addElasticsearchConfig(conf);
 
@@ -436,63 +437,67 @@ public class SparkInterpreter extends Interpreter {
   private void addElasticsearchConfig(final SparkConf conf)
   {
     final ElasticsearchAccess esAccess = ElasticsearchAccess.load();
-    final ClusterDetails clusterDetails = esAccess.findClusterDetails();
-    conf.set(getSparkEsConfigKey("es.net.ssl"), Boolean.toString(clusterDetails.isHttpSSL()));
-    conf.set(getSparkEsConfigKey("es.net.ssl.cert.allow.self.signed"), Boolean.toString(true));
-    if (clusterDetails.getUsername() != null)
-    {
-      conf.set(getSparkEsConfigKey("es.net.http.auth.user"), clusterDetails.getUsername());
-    }
-    if (clusterDetails.getPassword() != null)
-    {
-      conf.set(getSparkEsConfigKey("es.net.http.auth.pass"), new String(clusterDetails.getPassword()));
-    }
-    final java.nio.file.Path keystore = clusterDetails.getKeystore();
-    final java.nio.file.Path truststore = clusterDetails.getTruststore();
-    if (keystore != null)
-    {
-      if (!Files.exists(keystore))
-      {
-        throw new IllegalArgumentException("Could not locate keystore at " + keystore);
-      }
-      if (!Files.isReadable(keystore))
-      {
-        throw new IllegalArgumentException("Keystore at " + truststore + " was not a readable file");
-      }
-      System.err.println("Keystore is readable at " + keystore);
-      conf.set(getSparkEsConfigKey("es.net.ssl.keystore.location"), normalizeKeystoreLocation(keystore));
-    }
-    if (clusterDetails.getKeystorePassword() != null)
-    {
-      conf.set(getSparkEsConfigKey("es.net.ssl.keystore.pass"), new String(clusterDetails.getKeystorePassword()));
-    }
-    if (truststore != null)
-    {
-      if (!Files.exists(truststore))
-      {
-        throw new IllegalArgumentException("Could not locate truststore at " + truststore);
-      }
-      if (!Files.isReadable(truststore))
-      {
-        throw new IllegalArgumentException("Truststore at " + truststore + " was not a readable file");
 
+    if(esAccess.isConfigured())
+    {
+      final ClusterDetails clusterDetails = esAccess.findClusterDetails();
+      conf.set(getSparkEsConfigKey("es.net.ssl"), Boolean.toString(clusterDetails.isHttpSSL()));
+      conf.set(getSparkEsConfigKey("es.net.ssl.cert.allow.self.signed"), Boolean.toString(true));
+      if (clusterDetails.getUsername() != null)
+      {
+        conf.set(getSparkEsConfigKey("es.net.http.auth.user"), clusterDetails.getUsername());
       }
-      System.err.println("Truststore is readable at " + truststore);
-      conf.set(getSparkEsConfigKey("es.net.ssl.truststore.location"), normalizeKeystoreLocation(truststore));
+      if (clusterDetails.getPassword() != null)
+      {
+        conf.set(getSparkEsConfigKey("es.net.http.auth.pass"), new String(clusterDetails.getPassword()));
+      }
+      final java.nio.file.Path keystore = clusterDetails.getKeystore();
+      final java.nio.file.Path truststore = clusterDetails.getTruststore();
+      if (keystore != null)
+      {
+        if (!Files.exists(keystore))
+        {
+          throw new IllegalArgumentException("Could not locate keystore at " + keystore);
+        }
+        if (!Files.isReadable(keystore))
+        {
+          throw new IllegalArgumentException("Keystore at " + truststore + " was not a readable file");
+        }
+        System.err.println("Keystore is readable at " + keystore);
+        conf.set(getSparkEsConfigKey("es.net.ssl.keystore.location"), normalizeKeystoreLocation(keystore));
+      }
+      if (clusterDetails.getKeystorePassword() != null)
+      {
+        conf.set(getSparkEsConfigKey("es.net.ssl.keystore.pass"), new String(clusterDetails.getKeystorePassword()));
+      }
+      if (truststore != null)
+      {
+        if (!Files.exists(truststore))
+        {
+          throw new IllegalArgumentException("Could not locate truststore at " + truststore);
+        }
+        if (!Files.isReadable(truststore))
+        {
+          throw new IllegalArgumentException("Truststore at " + truststore + " was not a readable file");
+
+        }
+        System.err.println("Truststore is readable at " + truststore);
+        conf.set(getSparkEsConfigKey("es.net.ssl.truststore.location"), normalizeKeystoreLocation(truststore));
+      }
+      else if (keystore != null)
+      {
+        conf.set(getSparkEsConfigKey("es.net.ssl.truststore.location"), normalizeKeystoreLocation(keystore));
+      }
+      if (clusterDetails.getTruststorePassword() != null)
+      {
+        conf.set(getSparkEsConfigKey("es.net.ssl.truststore.pass"), new String(clusterDetails.getTruststorePassword()));
+      }
+      else if (clusterDetails.getKeystorePassword() != null)
+      {
+        conf.set(getSparkEsConfigKey("es.net.ssl.truststore.pass"), new String(clusterDetails.getKeystorePassword()));
+      }
+      conf.set(getSparkEsConfigKey("es.nodes"), findEsNodesConfig(esAccess));
     }
-    else if (keystore != null)
-    {
-      conf.set(getSparkEsConfigKey("es.net.ssl.truststore.location"), normalizeKeystoreLocation(keystore));
-    }
-    if (clusterDetails.getTruststorePassword() != null)
-    {
-      conf.set(getSparkEsConfigKey("es.net.ssl.truststore.pass"), new String(clusterDetails.getTruststorePassword()));
-    }
-    else if (clusterDetails.getKeystorePassword() != null)
-    {
-      conf.set(getSparkEsConfigKey("es.net.ssl.truststore.pass"), new String(clusterDetails.getKeystorePassword()));
-    }
-    conf.set(getSparkEsConfigKey("es.nodes"), findEsNodesConfig(esAccess));
   }
 
   private static String getSparkEsConfigKey(final String esConfigKey)
@@ -633,7 +638,7 @@ public class SparkInterpreter extends Interpreter {
 //        }
 //      }
       classpath += File.pathSeparator;
-      classpath += sparkYarnSupport.getSparkJar().toString();
+      //classpath += sparkYarnSupport.getSparkJar().toString();
       pathSettings.v_$eq(classpath);
       settings.scala$tools$nsc$settings$ScalaSettings$_setter_$classpath_$eq(pathSettings);
 
